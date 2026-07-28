@@ -8,6 +8,12 @@ def encode_bulk_string(s: str | None) -> str:
 def encode_simle_string(s: str) -> str:
     return f"+{s}\r\n"
 
+def encode_error(msg: str) -> str:
+    return f"-{msg}\r\n"
+
+def encode_integer(n: int) -> str:
+    return f":{n}\r\n"
+
 def handle_command(args):
     """Process a Redis command and return the RESP response."""
     cmd = args[0].upper()
@@ -18,7 +24,9 @@ def handle_command(args):
         return encode_bulk_string(args[1])
     elif cmd == "ECHO":
         return encode_bulk_string(args[1])
-    return "-ERR unknown command\r\n"
+    elif cmd == "COMMAND":
+        return encode_simle_string("OK")
+    return encode_error(f"ERR unknown command '{cmd}'")
 
 def main():
     for line in sys.stdin:
