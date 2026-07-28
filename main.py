@@ -5,6 +5,7 @@ store, expiry, clock = {}, {}, 0
 lists = {}
 hashes = {}
 sets = {}
+zsets = {}
 key_types = {}
 
 def encode_bulk_string(s):
@@ -199,6 +200,60 @@ def handle(args):
         for member in members:
             sets[key].remove(member)
         return encode_integer(cnt - len(sets[key]))
+    elif cmd == "ZADD":
+        key = args[1]
+        err = check_type(key, "zset")
+        if err: return err
+        pairs = args[2:]
+        if key not in zsets:
+            zsets[key] = {}
+            key_types[key] = "zset"
+        cnt = 0
+        for (score_str, member) in zip(pairs[0::2], pairs[1::2]):
+            score = float(score_str)
+            if member not in zsets[key]:
+                cnt += 1
+            zsets[key][member] = score
+        return encode_integer(cnt)
+    elif cmd == "ZSCORE":
+        key, member = args[1], args[2]
+        if key not in zsets or member not in zsets[key]:
+            return "$-1\r\n"
+        return encode_bulk_string(f"{zsets[key][member]:g}")
+    elif cmd == "ZRANGE":
+        key = args[1]
+        if key not in zsets:
+            return "*0\r\n"
+        start, stop = int(args[2]), int(args[3])
+        withscores = len(args) > 4 and args[4].upper() == "WITHSCORES"
+        members_sorted = sorted(zsets[key].items(), key=lambda x: (x[1], x[0]))
+        lst = [m for m, s in members_sorted]
+        if start < 0:
+            start = max(0, len(lst) + start)
+        if stop < 0:
+            stop = len(lst) + stop
+        result = lst[start:stop + 1]
+        if withscores:
+            items = []
+            for m in result:
+                items.append(encode_bulk_string(m))
+                items.append(encode_bulk_string(f"{zsets[key][m]:g}"))
+            return encode_array(items)
+        return encode_array([encode_bulk_string(m) for m in result])
+    elif cmd == "ZRANK":
+        key, member = args[1], args[2]
+        if key not in zsets or member not in zsets[key]:
+            return "$-1\r\n"
+        members_sorted = sorted(zsets[key].items(), key=lambda x: (x[1], x[0]))
+        for i, (m, s) in enumerate(members_sorted):
+            if m == member:
+                return encode_integer(i)
+        return "$-1\r\n"
+    elif cmd == "ZCARD":
+        key = args[1]
+        if key not in zsets:
+            return encode_integer(0)
+        return encode_integer(len(zsets[key]))
     return encode_error(f"ERR unknown command '{cmd}'")
 
 def pa(line):
