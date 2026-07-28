@@ -5,6 +5,9 @@ store, expiry, clock = {}, {}, 0
 lists, hashes, sets, zsets = {}, {}, {}, {}
 key_types = {}
 
+in_tx = False
+queue = []
+
 def encode_bulk_string(s):
     if s is None:
         return "$-1\r\n"
@@ -21,7 +24,7 @@ def encode_integer(n):
 
 def check_expiry(key):
     """ Check if key is expired. If so, delete from store and expiry dicts."""
-    if expiry[key] < clock:
+    if key in expiry and expiry[key] < clock:
         store.pop(key)
         expiry.pop(key)
 
@@ -36,7 +39,7 @@ def check_type(key, expected):
         return encode_error("WRONGTYPE Operation against a key holding the wrong kind of value")
     return None
 
-def handle(args):
+def exec_cmd(args):
     global clock
     cmd = args[0].upper()
     if cmd == "WAIT":
@@ -274,6 +277,34 @@ def handle(args):
             return encode_integer(0)
         return encode_integer(len(zsets[key]))
     return encode_error(f"ERR unknown command '{cmd}'")
+
+def handle(args):
+    global in_tx, queue
+    cmd = args[0].upper()
+    if cmd == "MULTI":
+        if in_tx:
+            return encode_error("ERR already in tx")
+        in_tx = True
+        queue = []
+        return encode_simple_string("OK")
+    elif cmd == "EXEC":
+        if not in_tx:
+            return encode_error("ERR EXEC without MULTI")
+        lst = []
+        for cmd in queue:
+            lst.append(exec_cmd(cmd))
+        in_tx = False
+        queue = []
+        return encode_array(lst)
+    elif cmd == "DISCARD":
+        in_tx = False
+        queue.clear()
+        return encode_simple_string("OK")
+    elif in_tx:
+        queue.append(args)
+        return encode_simple_string("QUEUED")
+    else:
+        return exec_cmd(args)
 
 def pa(line):
     a, c, q = [], "", False
