@@ -1,0 +1,3 @@
+SET counter 10
+EVAL "return redis.call('INCR', KEYS[1])" 1 counter
+GET counter

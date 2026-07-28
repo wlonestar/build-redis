@@ -1,0 +1,2 @@
+EVAL "return ARGV[1]" 0 firstarg
+EVAL "return ARGV[2]" 0 a secondarg

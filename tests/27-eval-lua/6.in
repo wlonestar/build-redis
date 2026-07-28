@@ -1,0 +1,2 @@
+EVAL "return #KEYS" 3 a b c
+EVAL "return #KEYS" 0
