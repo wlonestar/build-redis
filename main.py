@@ -333,6 +333,26 @@ def handle(args):
             remaining -= 1
             result += encode_simple_string(f"unsubscribe {channel} {remaining}")
         return result
+    elif cmd == "SAVE":
+        result = ""
+        for key in sorted(store.keys()):
+            result += f"KEY string {key} {store[key]}\r\n"
+        for key in lists:
+            items = [f"{x}" for x in lists[key]]
+            result += f"KEY list {key} {','.join(items)}\r\n"
+        for key in hashes:
+            items = [f"{k}={v}" for k, v in hashes[key]]
+            result += f"KEY hash {key} {','.join(items)}\r\n"
+        for key in sets:
+            items = [f"{x}" for x in sets[key]]
+            result += f"KEY set {key} {','.join(items)}\r\n"
+        return result + encode_simple_string("OK")
+    elif cmd == "RESTORE":
+        data: str = args[1]
+        _, type, key, data = data.split(" ")
+        if type == "string":
+            store[key] = data
+        return encode_simple_string("OK")
     else:
         return exec_cmd(args)
 
