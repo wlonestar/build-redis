@@ -1,0 +1,5 @@
+XADD s * f v
+XADD s * f w
+XADD s * f x
+XRANGE s 2-0 3-0
+XRANGE s - 2-0

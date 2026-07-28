@@ -1,0 +1,5 @@
+XADD s * f v
+XADD s * f w
+XADD s * f x
+XREAD COUNT 2 STREAMS s 0-0
+XREAD STREAMS s 2-0

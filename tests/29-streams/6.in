@@ -1,0 +1,2 @@
+XADD s * f v
+XREAD STREAMS s 5-0

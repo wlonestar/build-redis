@@ -1,0 +1,8 @@
+$3
+1-0
+-ERR The ID specified in XADD is equal or smaller than the target stream top item
+$3
+1-1
+-ERR The ID specified in XADD is equal or smaller than the target stream top item
+$3
+2-0
