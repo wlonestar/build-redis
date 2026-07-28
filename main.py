@@ -4,6 +4,7 @@ from collections import deque
 store, expiry, clock = {}, {}, 0
 lists = {}
 hashes = {}
+sets = {}
 key_types = {}
 
 def encode_bulk_string(s):
@@ -172,7 +173,32 @@ def handle(args):
         return encode_integer(1 if field in hashes[key] else 0)
     elif cmd == "HLEN":
         key = args[1]
-        return encode_integer(len(hashes[key]))
+        return encode_integer(len(sets[key]))
+    elif cmd == "SADD":
+        key, members = args[1], args[2:]
+        if key not in sets:
+            sets[key] = set()
+            key_types[key] = "set"
+        cnt = len(sets[key])
+        for m in members:
+            sets[key].add(m)
+        return encode_integer(len(sets[key]) - cnt)
+    elif cmd == "SMEMBERS":
+        key = args[1]
+        lst = [encode_bulk_string(x) for x in sets[key]]
+        return encode_array(lst)
+    elif cmd == "SISMEMBER":
+        key, member = args[1], args[2]
+        return encode_integer(1 if member in sets[key] else 0)
+    elif cmd == "SCARD":
+        key = args[1]
+        return encode_integer(len(sets[key]))
+    elif cmd == "SREM":
+        key, members = args[1], args[2:]
+        cnt = len(sets[key])
+        for member in members:
+            sets[key].remove(member)
+        return encode_integer(cnt - len(sets[key]))
     return encode_error(f"ERR unknown command '{cmd}'")
 
 def pa(line):
