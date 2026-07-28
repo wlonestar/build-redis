@@ -2,10 +2,7 @@ import sys
 from collections import deque
 
 store, expiry, clock = {}, {}, 0
-lists = {}
-hashes = {}
-sets = {}
-zsets = {}
+lists, hashes, sets, zsets = {}, {}, {}, {}
 key_types = {}
 
 def encode_bulk_string(s):
@@ -42,7 +39,9 @@ def check_type(key, expected):
 def handle(args):
     global clock
     cmd = args[0].upper()
-    if cmd == "WAIT": clock += int(args[1]); return encode_simple_string("OK")
+    if cmd == "WAIT":
+        clock += int(args[1]);
+        return encode_simple_string("OK")
     elif cmd == "SET":
         key, val = args[1], args[2]
         ex_ms = None
@@ -53,7 +52,7 @@ def handle(args):
             elif f == "PX": ex_ms = int(args[i+1]); i += 2
             else: i += 1
         store[key] = val
-        key_types[key] = "str"
+        key_types[key] = "string"
         if ex_ms is not None: expiry[key] = clock + ex_ms
         return encode_simple_string("OK")
     elif cmd == "GET":
@@ -61,12 +60,32 @@ def handle(args):
         check_expiry(args[1])
         return encode_bulk_string(store.get(args[1]))
     elif cmd == "EXISTS":
-        # Check expiry for each key, count existing ones
-        cnt = len(store)
-        for key in store:
-            if expiry[key] < clock:
-                cnt -= 1
+        keys = args[1:]
+        cnt = 0
+        for key in keys:
+            if key in key_types:
+                cnt += 1
         return encode_integer(cnt)
+    elif cmd == "DEL":
+        keys = args[1:]
+        cnt = 0
+        for key in keys:
+            if key in store:
+                cnt += 1
+                store.pop(key)
+                key_types.pop(key)
+        return encode_integer(cnt)
+    elif cmd == "KEYS":
+        lst = [encode_bulk_string(x) for x in store]
+        return encode_array(lst) 
+    elif cmd == "TYPE":
+        key = args[1]
+        return encode_simple_string(key_types[key] if key in key_types else "none")
+    elif cmd == "RENAME":
+        key, newkey = args[1], args[2]
+        if key not in store:
+            return encode_error("ERR source does not exist")
+        return encode_simple_string("OK")
     elif cmd == "TTL":
         check_expiry(args[1])
         if args[1] not in store: return encode_integer(-2)
