@@ -10,6 +10,11 @@ queue = []
 
 subscriptions = set()
 
+aof_log = []
+aof_enabled = False
+
+WRITE_CMDS = {"SET", "DEL", "LPUSH", "RPUSH", "LPOP", "RPOP", "HSET", "HDEL"}
+
 def encode_bulk_string(s):
     if s is None:
         return "$-1\r\n"
@@ -42,9 +47,79 @@ def check_type(key, expected):
     return None
 
 def exec_cmd(args):
-    global clock
+    global clock, in_tx, queue
     cmd = args[0].upper()
-    if cmd == "WAIT":
+    if cmd == "MULTI":
+        if in_tx:
+            return encode_error("ERR already in tx")
+        in_tx = True
+        queue = []
+        return encode_simple_string("OK")
+    elif cmd == "EXEC":
+        if not in_tx:
+            return encode_error("ERR EXEC without MULTI")
+        lst = []
+        for cmd in queue:
+            lst.append(exec_cmd(cmd))
+        in_tx = False
+        queue = []
+        return encode_array(lst)
+    elif cmd == "DISCARD":
+        in_tx = False
+        queue.clear()
+        return encode_simple_string("OK")
+    elif in_tx:
+        queue.append(args)
+        return encode_simple_string("QUEUED")
+    elif cmd == "SUBSCRIBE":
+        channels = args[1:]
+        total_count = len(subscriptions)
+        result = ""
+        for channel in channels:
+            subscriptions.add(channel)
+            total_count += 1
+            result += encode_simple_string(f"subscribe {channel} {total_count}")
+        return result
+    elif cmd == "PUBLISH":
+        channel, message = args[1], args[2]
+        result = ""
+        if channel in subscriptions:
+            result += encode_simple_string(f"message {channel} {message}")
+        return result + encode_integer(1 if channel in subscriptions else 0)
+    elif cmd == "UNSUBSCRIBE":
+        lst = []
+        if len(args) == 1:
+            lst = reversed(list(subscriptions))
+        else:
+            lst = args[1:]
+        remaining = len(subscriptions)
+        result = ""
+        for channel in lst:
+            subscriptions.remove(channel)
+            remaining -= 1
+            result += encode_simple_string(f"unsubscribe {channel} {remaining}")
+        return result
+    elif cmd == "SAVE":
+        result = ""
+        for key in sorted(store.keys()):
+            result += f"KEY string {key} {store[key]}\r\n"
+        for key in lists:
+            items = [f"{x}" for x in lists[key]]
+            result += f"KEY list {key} {','.join(items)}\r\n"
+        for key in hashes:
+            items = [f"{k}={v}" for k, v in hashes[key]]
+            result += f"KEY hash {key} {','.join(items)}\r\n"
+        for key in sets:
+            items = [f"{x}" for x in sets[key]]
+            result += f"KEY set {key} {','.join(items)}\r\n"
+        return result + encode_simple_string("OK")
+    elif cmd == "RESTORE":
+        data: str = args[1]
+        _, type, key, data = data.split(" ")
+        if type == "string":
+            store[key] = data
+        return encode_simple_string("OK")
+    elif cmd == "WAIT":
         clock += int(args[1]);
         return encode_simple_string("OK")
     elif cmd == "SET":
@@ -280,81 +355,32 @@ def exec_cmd(args):
         return encode_integer(len(zsets[key]))
     return encode_error(f"ERR unknown command '{cmd}'")
 
-def handle(args):
-    global in_tx, queue
+def handle(args, raw_line):
+    global aof_enabled
     cmd = args[0].upper()
-    if cmd == "MULTI":
-        if in_tx:
-            return encode_error("ERR already in tx")
-        in_tx = True
-        queue = []
+    if cmd == "AOF":
+        sub = args[1].upper() if len(args) > 1 else ""
+        if sub == "ON":
+            aof_enabled = True
+            return encode_simple_string("OK")
+        if sub == "OFF":
+            aof_enabled = False
+            return encode_simple_string("OK")
+        if sub == "CLEAR":
+            aof_log.clear()
+            return encode_simple_string("OK")
+        if sub == "DUMP":
+            result = ""
+            for x in aof_log:
+                result += encode_bulk_string(x)
+            return result + encode_simple_string("OK")
+        if sub == "REPLAY":
+            pass
         return encode_simple_string("OK")
-    elif cmd == "EXEC":
-        if not in_tx:
-            return encode_error("ERR EXEC without MULTI")
-        lst = []
-        for cmd in queue:
-            lst.append(exec_cmd(cmd))
-        in_tx = False
-        queue = []
-        return encode_array(lst)
-    elif cmd == "DISCARD":
-        in_tx = False
-        queue.clear()
-        return encode_simple_string("OK")
-    elif in_tx:
-        queue.append(args)
-        return encode_simple_string("QUEUED")
-    elif cmd == "SUBSCRIBE":
-        channels = args[1:]
-        total_count = len(subscriptions)
-        result = ""
-        for channel in channels:
-            subscriptions.add(channel)
-            total_count += 1
-            result += encode_simple_string(f"subscribe {channel} {total_count}")
-        return result
-    elif cmd == "PUBLISH":
-        channel, message = args[1], args[2]
-        result = ""
-        if channel in subscriptions:
-            result += encode_simple_string(f"message {channel} {message}")
-        return result + encode_integer(1 if channel in subscriptions else 0)
-    elif cmd == "UNSUBSCRIBE":
-        lst = []
-        if len(args) == 1:
-            lst = reversed(list(subscriptions))
-        else:
-            lst = args[1:]
-        remaining = len(subscriptions)
-        result = ""
-        for channel in lst:
-            subscriptions.remove(channel)
-            remaining -= 1
-            result += encode_simple_string(f"unsubscribe {channel} {remaining}")
-        return result
-    elif cmd == "SAVE":
-        result = ""
-        for key in sorted(store.keys()):
-            result += f"KEY string {key} {store[key]}\r\n"
-        for key in lists:
-            items = [f"{x}" for x in lists[key]]
-            result += f"KEY list {key} {','.join(items)}\r\n"
-        for key in hashes:
-            items = [f"{k}={v}" for k, v in hashes[key]]
-            result += f"KEY hash {key} {','.join(items)}\r\n"
-        for key in sets:
-            items = [f"{x}" for x in sets[key]]
-            result += f"KEY set {key} {','.join(items)}\r\n"
-        return result + encode_simple_string("OK")
-    elif cmd == "RESTORE":
-        data: str = args[1]
-        _, type, key, data = data.split(" ")
-        if type == "string":
-            store[key] = data
-        return encode_simple_string("OK")
-    else:
-        return exec_cmd(args)
+    result = exec_cmd(args)
+    if aof_enabled and cmd in WRITE_CMDS:
+        aof_log.append(raw_line)
+    return result
 
 def pa(line):
     a, c, q = [], "", False
@@ -368,4 +394,4 @@ def pa(line):
 for line in sys.stdin:
     line=line.strip()
     if not line: continue
-    sys.stdout.write(handle(pa(line))); sys.stdout.flush()
+    sys.stdout.write(handle(pa(line), line)); sys.stdout.flush()
