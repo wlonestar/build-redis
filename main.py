@@ -7,8 +7,10 @@ def es(s): return f"+{s}\r\n"
 def ee(m): return f"-{m}\r\n"
 def ei(n): return f":{n}\r\n"
 def check_expiry(key):
-    if key in expiry and clock >= expiry[key]:
-        store.pop(key, None); expiry.pop(key, None)
+    """ Check if key is expired. If so, delete from store and expiry dicts."""
+    if expiry[key] < clock:
+        store.pop(key)
+        expiry.pop(key)
 
 def handle(args):
     global clock
@@ -16,53 +18,44 @@ def handle(args):
     if cmd == "WAIT": clock += int(args[1]); return es("OK")
     elif cmd == "SET":
         key, val = args[1], args[2]
-        # Parse optional flags: EX <secs>, PX <ms>, NX, XX
-        ex_secs, px_ms, nx, xx = None, None, False, False
+        ex_ms = None
         i = 3
         while i < len(args):
-            flag = args[i].upper()
-            if flag == "EX" and i + 1 < len(args):
-                ex_secs = int(args[i+1]); i += 2
-            elif flag == "PX" and i + 1 < len(args):
-                px_ms = int(args[i+1]); i += 2
-            elif flag == "NX":
-                nx = True; i += 1
-            elif flag == "XX":
-                xx = True; i += 1
-            else:
-                i += 1
-        # Handle NX/XX flags
-        if nx and key in store:
-            return eb(None)
-        if xx and key not in store:
-            return eb(None)
+            f = args[i].upper()
+            if f == "EX": ex_ms = int(args[i+1]) * 1000; i += 2
+            elif f == "PX": ex_ms = int(args[i+1]); i += 2
+            else: i += 1
         store[key] = val
-        # Set expiry if EX or PX provided
-        if ex_secs is not None:
-            expiry[key] = clock + ex_secs * 1000
-        elif px_ms is not None:
-            expiry[key] = clock + px_ms
+        if ex_ms is not None: expiry[key] = clock + ex_ms
         return es("OK")
     elif cmd == "GET":
-        check_expiry(args[1]); return eb(store.get(args[1]))
+        # Call check_expiry before accessing
+        check_expiry(args[1])
+        return eb(store.get(args[1]))
+    elif cmd == "EXISTS":
+        # Check expiry for each key, count existing ones
+        cnt = len(store)
+        for key in store:
+            if expiry[key] < clock:
+                cnt -= 1
+        return ei(cnt)
     elif cmd == "TTL":
         check_expiry(args[1])
         if args[1] not in store: return ei(-2)
         if args[1] not in expiry: return ei(-1)
-        return ei((expiry[args[1]] - clock) // 1000)
-    elif cmd == "PTTL":
-        check_expiry(args[1])
-        if args[1] not in store: return ei(-2)
-        if args[1] not in expiry: return ei(-1)
-        return ei(expiry[args[1]] - clock)
+        return ei(max(0, (expiry[args[1]] - clock) // 1000))
+    elif cmd == "DBSIZE":
+        # Count only non-expired keys
+        cnt = 0
+        for key in store:
+            if expiry[key] < clock:
+                cnt += 1
+        return ei(cnt)
     elif cmd == "EXPIRE":
+        check_expiry(args[1])
         if args[1] not in store: return ei(0)
         expiry[args[1]] = clock + int(args[2]) * 1000; return ei(1)
-    elif cmd == "PERSIST":
-        if args[1] in expiry: del expiry[args[1]]; return ei(1)
-        return ei(0)
     elif cmd == "PING": return es("PONG") if len(args)==1 else eb(args[1])
-    elif cmd == "DBSIZE": return ei(len(store))
     return ee(f"ERR unknown command '{cmd}'")
 
 def pa(line):
