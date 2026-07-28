@@ -1,60 +1,89 @@
 import sys
-store = {}
-access_times = {}  # key -> last access clock time
-clock = 0
-maxkeys = 0  # 0 = unlimited
 
+store = {}
+versions = {}        # key -> int (incremented on every write)
+watched = {}         # key -> snapshot version captured at WATCH time
+in_multi = False
+queue = []
+
+def es(s): return f"+{s}\r\n"
 def eb(s):
     if s is None: return "$-1\r\n"
     return f"${len(s)}\r\n{s}\r\n"
-def es(s): return f"+{s}\r\n"
 def ee(m): return f"-{m}\r\n"
 def ei(n): return f":{n}\r\n"
 
-def touch(key):
-    """Update access time for a key."""
-    access_times[key] = clock
+def bump(key):
+    versions[key] = versions.get(key, 0) + 1
 
-def evict_if_needed():
-    """If maxkeys is set and we're at capacity, evict LRU key."""
-    if maxkeys <= 0 or len(store) < maxkeys:
-        return
-    lru_key = min(access_times, key=access_times.get)
-    del store[lru_key]
-    del access_times[lru_key]
-
-def handle(args):
-    global clock, maxkeys
+def run_write(args):
+    """Apply a write command (used both during normal ops and during EXEC)."""
     cmd = args[0].upper()
-    if cmd == "WAIT": clock += int(args[1]); return es("OK")
-    elif cmd == "MAXKEYS": maxkeys = int(args[1]); return es("OK")
-    elif cmd == "SET":
-        key = args[1]
-        if key not in store:
-            evict_if_needed()
-        store[key] = args[2]; touch(key); return es("OK")
-    elif cmd == "GET":
-        if args[1] in store:
-            touch(args[1])
-        return eb(store.get(args[1]))
-    elif cmd == "DBSIZE": return ei(len(store))
-    elif cmd == "INFO":
-        if len(args) > 1 and args[1].lower() == "memory":
-            info = f"keys:{len(store)},maxkeys:{maxkeys}"
-            return eb(info)
-    elif cmd == "PING": return es("PONG") if len(args)==1 else eb(args[1])
+    if cmd == "SET":
+        store[args[1]] = args[2]; bump(args[1])
+        return es("OK")
+    if cmd == "INCR":
+        v = int(store.get(args[1], "0")) + 1
+        store[args[1]] = str(v); bump(args[1])
+        return ei(v)
+    if cmd == "DEL":
+        deleted = 0
+        for k in args[1:]:
+            if k in store:
+                del store[k]; bump(k); deleted += 1
+        return ei(deleted)
     return ee(f"ERR unknown command '{cmd}'")
 
-def pa(line):
+def handle(args):
+    global in_multi, queue, watched
+    cmd = args[0].upper()
+    if cmd == "WATCH":
+        if in_multi:
+            return ee("ERR WATCH inside MULTI is not allowed")
+        for k in args[1:]:
+            watched[k] = versions.get(k, 0)
+        return es("OK")
+    elif cmd == "UNWATCH":
+        watched = {}
+        return es("OK")
+    elif cmd == "MULTI":
+        in_multi = True; queue = []
+        return es("OK")
+    elif cmd == "EXEC":
+        if not in_multi:
+            return ee("ERR EXEC without MULTI")
+        for k, snap in watched.items():
+            if versions.get(k, 0) != snap:
+                in_multi = False; queue = []; watched = {}
+                return "$-1\r\n"
+        results = "".join(run_write(cmd) for cmd in queue)
+        n = len(queue)
+        in_multi = False; queue = []; watched = {}
+        return f"*{n}\r\n{results}"
+
+    elif cmd == "DISCARD":
+        in_multi = False; queue = []; watched = {}
+        return es("OK")
+    elif cmd == "GET":
+        return eb(store.get(args[1]))
+    else:
+        if in_multi:
+            queue.append(args)
+            return es("QUEUED")
+        return run_write(args)
+
+def parse(line):
     a, c, q = [], "", False
     for ch in line:
-        if ch=='"': q=not q
-        elif ch==' ' and not q:
-            if c: a.append(c); c=""
-        else: c+=ch
+        if ch == '"': q = not q
+        elif ch == ' ' and not q:
+            if c: a.append(c); c = ""
+        else: c += ch
     if c: a.append(c)
     return a
+
 for line in sys.stdin:
-    line=line.strip()
+    line = line.strip()
     if not line: continue
-    sys.stdout.write(handle(pa(line))); sys.stdout.flush()
+    sys.stdout.write(handle(parse(line)))
+    sys.stdout.flush()
