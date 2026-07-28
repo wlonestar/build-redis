@@ -3,6 +3,7 @@ from collections import deque
 
 store, expiry, clock = {}, {}, 0
 lists = {}
+hashes = {}
 key_types = {}
 
 def encode_bulk_string(s):
@@ -133,6 +134,20 @@ def handle(args):
         if start < 0: start = max(0, len(lists[key]) + start)
         if stop < 0: stop = len(lists[key]) + stop
         return encode_array([encode_bulk_string(x) for x in lst[start:stop+1]])
+    elif cmd == "HSET":
+        key = args[1]
+        pairs = args[2:]
+        if key not in hashes:
+            hashes[key] = {}
+            key_types[key] = "hash"
+        for (field, value) in zip(pairs[0::2], pairs[1::2]):
+            hashes[key][field] = value
+        return encode_integer(len(hashes[key]))
+    elif cmd == "HGET":
+        key, field = args[1], args[2]
+        if key not in hashes:
+            return "$-1\r\n"
+        return encode_bulk_string(hashes[key][field])
     return encode_error(f"ERR unknown command '{cmd}'")
 
 def pa(line):
