@@ -148,6 +148,31 @@ def handle(args):
         if key not in hashes:
             return "$-1\r\n"
         return encode_bulk_string(hashes[key][field])
+    elif cmd == "HDEL":
+        key, field = args[1], args[2]
+        fields = args[3:]
+        cnt = 1
+        hashes[key].pop(field)
+        for f in fields:
+            hashes[key].pop(f)
+            cnt += 1
+        if len(hashes[key]) == 0:
+            hashes.pop(key)
+        return encode_integer(cnt)
+    elif cmd == "HGETALL":
+        key = args[1]
+        lst = []
+        for field in hashes[key]:
+            value = hashes[key][field]
+            lst.append(field)
+            lst.append(value)
+        return encode_array([encode_bulk_string(x) for x in lst])
+    elif cmd == "HEXISTS":
+        key, field = args[1], args[2]
+        return encode_integer(1 if field in hashes[key] else 0)
+    elif cmd == "HLEN":
+        key = args[1]
+        return encode_integer(len(hashes[key]))
     return encode_error(f"ERR unknown command '{cmd}'")
 
 def pa(line):
