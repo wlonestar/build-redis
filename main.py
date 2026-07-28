@@ -84,48 +84,55 @@ def handle(args):
         return encode_simple_string("PONG") if len(args)==1 else encode_bulk_string(args[1])
     elif cmd == "LPUSH":
         key = args[1]
-        values = args[2:]
         err = check_type(key, "list")
-        if err:
-            return err
-        # Create deque if key does not exist
-        q = lists[key] if key in lists else deque()
-        # Push values to LEFT (appendleft) in order
-        for val in values:
-            q.appendleft(val)
-        # Set key_types[key] = "list"
-        key_types[key] = "list"
-        lists[key] = q
-        # Return new length as integer
-        return encode_integer(len(q))
+        if err: return err
+        if key not in lists:
+            lists[key] = deque()
+            key_types[key] = "list"
+        for val in args[2:]:
+            lists[key].appendleft(val)
+        return encode_integer(len(lists[key]))
     elif cmd == "RPUSH":
         key = args[1]
-        values = args[2:]
         err = check_type(key, "list")
-        if err:
-            return err
-        # Create deque if key does not exist
-        q = lists[key] if key in lists else deque()
-        # Push values to RIGHT (append) in order
-        for val in values:
-            q.append(val)
-        # Set key_types[key] = "list"
-        key_types[key] = "list"
-        lists[key] = q
-        # Return new length as integer
-        return encode_integer(len(q))
-    elif cmd == "LRANGE":
-        # Implement LRANGE key start stop
+        if err: return err
+        if key not in lists:
+            lists[key] = deque()
+            key_types[key] = "list"
+        for val in args[2:]:
+            lists[key].append(val)
+        return encode_integer(len(lists[key]))
+    elif cmd == "LPOP":
+        # Remove and return leftmost element, or $-1 if missing
         key = args[1]
-        err = check_type(key, "list")
-        if err:
-            return err
-        start = int(args[2])
-        stop = len(lists[key]) if int(args[3]) == -1 else int(args[3])
-        items = []
-        for i in range(start, stop):
-            items.append(encode_bulk_string(lists[key][i]))
-        return encode_array(items)
+        if key not in lists:
+            return "$-1\r\n"
+        elem = lists[key].popleft()
+        # Auto-delete key if list becomes empty
+        if len(lists[key]) == 0:
+            lists.pop(key)
+        return encode_bulk_string(elem)
+    elif cmd == "RPOP":
+        # Remove and return rightmost element
+        key = args[1]
+        if key not in lists:
+            return "$-1\r\n"
+        elem = lists[key].pop()
+        if len(lists[key]) == 0:
+            lists.pop(key)
+        return encode_bulk_string(elem)
+    elif cmd == "LLEN":
+        # Return list length, or :0 if key missing
+        key = args[1]
+        return encode_integer(len(lists[key]) if key in lists else 0)
+    elif cmd == "LRANGE":
+        key = args[1]
+        if key not in lists: return "*0\r\n"
+        start, stop = int(args[2]), int(args[3])
+        lst = list(lists[key])
+        if start < 0: start = max(0, len(lists[key]) + start)
+        if stop < 0: stop = len(lists[key]) + stop
+        return encode_array([encode_bulk_string(x) for x in lst[start:stop+1]])
     return encode_error(f"ERR unknown command '{cmd}'")
 
 def pa(line):
