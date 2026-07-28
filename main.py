@@ -21,9 +21,14 @@ def handle_command(args):
     if cmd == "PING":
         if len(args) == 1:
             return encode_simle_string("PONG")
-        return encode_bulk_string(args[1])
+        elif len(args) == 2:
+            return encode_bulk_string(args[1])
+        else:
+            return encode_error(f"ERR wrong number of arguments for '{cmd}' command")
     elif cmd == "ECHO":
-        return encode_bulk_string(args[1])
+        if len(args) == 2:
+            return encode_bulk_string(args[1])
+        return encode_error(f"ERR wrong number of arguments for '{cmd}' command")
     elif cmd == "COMMAND":
         return encode_simle_string("OK")
     return encode_error(f"ERR unknown command '{cmd}'")
