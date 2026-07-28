@@ -1,14 +1,23 @@
 import sys
 
+def encode_bulk_string(s: str | None) -> str:
+    if s is None:
+        return "$-1\r\n"
+    return f"${len(s)}\r\n{s}\r\n"
+
+def encode_simle_string(s: str) -> str:
+    return f"+{s}\r\n"
+
 def handle_command(args):
     """Process a Redis command and return the RESP response."""
     cmd = args[0].upper()
 
     if cmd == "PING":
         if len(args) == 1:
-            return "+PONG\r\n"
-        return f"${len(args[1])}\r\n{args[1]}\r\n"
-
+            return encode_simle_string("PONG")
+        return encode_bulk_string(args[1])
+    elif cmd == "ECHO":
+        return encode_bulk_string(args[1])
     return "-ERR unknown command\r\n"
 
 def main():
@@ -23,9 +32,7 @@ def main():
 
 def parse_args(line):
     """Split a command line into arguments, handling quoted strings."""
-    args = []
-    current = ""
-    in_quotes = False
+    args, current, in_quotes= [], "", False
     for ch in line:
         if ch == '"' and not in_quotes:
             in_quotes = True
