@@ -8,6 +8,8 @@ key_types = {}
 in_tx = False
 queue = []
 
+subscriptions = set()
+
 def encode_bulk_string(s):
     if s is None:
         return "$-1\r\n"
@@ -303,6 +305,34 @@ def handle(args):
     elif in_tx:
         queue.append(args)
         return encode_simple_string("QUEUED")
+    elif cmd == "SUBSCRIBE":
+        channels = args[1:]
+        total_count = len(subscriptions)
+        result = ""
+        for channel in channels:
+            subscriptions.add(channel)
+            total_count += 1
+            result += encode_simple_string(f"subscribe {channel} {total_count}")
+        return result
+    elif cmd == "PUBLISH":
+        channel, message = args[1], args[2]
+        result = ""
+        if channel in subscriptions:
+            result += encode_simple_string(f"message {channel} {message}")
+        return result + encode_integer(1 if channel in subscriptions else 0)
+    elif cmd == "UNSUBSCRIBE":
+        lst = []
+        if len(args) == 1:
+            lst = reversed(list(subscriptions))
+        else:
+            lst = args[1:]
+        remaining = len(subscriptions)
+        result = ""
+        for channel in lst:
+            subscriptions.remove(channel)
+            remaining -= 1
+            result += encode_simple_string(f"unsubscribe {channel} {remaining}")
+        return result
     else:
         return exec_cmd(args)
 
